@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><meta name="theme-color" content="#1f5fd6"><title>RSVP Count</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@400;700;900&display=swap">
+<link rel="stylesheet" href="styles.css">
+<style>
+.admin h1{font-family:var(--display);font-weight:400;font-size:clamp(32px,7vw,48px);color:var(--plate);margin:0 0 4px;text-align:center}
+.admin .sub{text-align:center;color:var(--muted);margin:0 0 24px}
+.tiles{display:grid;grid-template-columns:repeat(2,1fr);gap:22px 14px;margin:18px 0 26px}
+.tile{--c:var(--red);position:relative;background:var(--c);color:#fff;border-radius:10px;padding:16px 14px 14px;box-shadow:inset 0 -6px 0 rgba(0,0,0,.18)}
+.tile::before{content:"";position:absolute;left:14px;right:14px;top:-9px;height:10px;background:radial-gradient(ellipse 9px 10px at 50% 100%,var(--c) 98%,transparent) 0 0/26px 10px repeat-x}
+.tile b{display:block;font-family:var(--display);font-weight:400;font-size:44px;line-height:1;font-variant-numeric:tabular-nums}
+.tile span{font-weight:900;font-size:14px}
+.tile.kids{--c:var(--green)}.tile.total{--c:var(--plate)}.tile.fam{--c:var(--orange)}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:15px}
+th,td{padding:10px 8px;border-bottom:2px solid var(--line);text-align:left;vertical-align:top}
+th{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.no td{color:var(--muted)}
+.pill{display:inline-block;font-size:12px;font-weight:900;padding:2px 8px;border-radius:6px;background:#e7f7ec;color:var(--green)}
+.no .pill{background:#f1f2f6;color:var(--muted)}
+.note{font-size:13px;color:var(--muted)}
+.bar{display:flex;gap:10px;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-top:18px}
+.linkbtn{border:0;background:none;color:var(--plate);font:inherit;font-weight:900;cursor:pointer;padding:0;text-decoration:underline}
+#signin form{max-width:380px;margin:0 auto}
+</style></head>
+<body><main class="shell"><section class="panel admin" style="margin-top:0">
+<h1>RSVP Count</h1>
+<p class="sub" id="partyName"></p>
+
+<div id="setup" class="notice" hidden>Add your Supabase details to <code>config.js</code> first.</div>
+
+<div id="signin" hidden>
+  <form id="loginForm" novalidate>
+    <label for="email">Host email</label>
+    <input id="email" type="email" autocomplete="email" placeholder="you@example.com" required>
+    <button class="button submit" id="loginBtn" type="submit">Email me a sign-in link</button>
+    <div id="loginStatus" class="status" role="status" aria-live="polite"></div>
+  </form>
+</div>
+
+<div id="report" hidden>
+  <div class="tiles">
+    <div class="tile"><b id="tAdults">0</b><span>adults</span></div>
+    <div class="tile kids"><b id="tKids">0</b><span>kids</span></div>
+    <div class="tile total"><b id="tTotal">0</b><span>total guests</span></div>
+    <div class="tile fam"><b id="tFam">0</b><span>families coming</span></div>
+  </div>
+  <p class="sub" id="declined"></p>
+  <div id="empty" class="notice" hidden>No RSVPs yet. If you know some have come in, check that you ran <code>admin.sql</code> with this email address.</div>
+  <div class="table-wrap"><table id="table" hidden>
+    <thead><tr><th>Family</th><th></th><th class="num">Adults</th><th class="num">Kids</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table></div>
+  <div class="bar">
+    <button class="linkbtn" id="refresh" type="button">Refresh</button>
+    <span class="note" id="who"></span>
+    <button class="linkbtn" id="signout" type="button">Sign out</button>
+  </div>
+</div>
+<div id="error" class="status error" role="alert"></div>
+</section></main>
+
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+(() => {
+  'use strict';
+  const conf = window.PARTY_CONFIG;
+  const $ = (id) => document.getElementById(id);
+  $('partyName').textContent = conf.partyName;
+  if (!conf.supabaseUrl || !conf.supabasePublishableKey) { $('setup').hidden = false; return; }
+
+  const sb = supabase.createClient(conf.supabaseUrl, conf.supabasePublishableKey);
+  const show = (id) => ['signin', 'report'].forEach(s => $(s).hidden = s !== id);
+
+  $('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = $('email').value.trim();
+    if (!$('email').checkValidity() || !email) { $('loginStatus').textContent = 'Enter a valid email address.'; return; }
+    $('loginBtn').disabled = true;
+    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
+    $('loginBtn').disabled = false;
+    $('loginStatus').textContent = error ? 'Could not send the link: ' + error.message : 'Check your email and tap the sign-in link.';
+  });
+
+  async function load() {
+    $('error').textContent = '';
+    const { data, error } = await sb.from('rsvps').select('family_name,attending,adults,kids,note,created_at').order('created_at');
+    if (error) { $('error').textContent = 'Could not load RSVPs: ' + error.message; return; }
+    const yes = data.filter(r => r.attending), no = data.filter(r => !r.attending);
+    const adults = yes.reduce((n, r) => n + r.adults, 0), kids = yes.reduce((n, r) => n + r.kids, 0);
+    $('tAdults').textContent = adults; $('tKids').textContent = kids;
+    $('tTotal').textContent = adults + kids; $('tFam').textContent = yes.length;
+    $('declined').textContent = no.length ? `${no.length} ${no.length === 1 ? 'family' : 'families'} can't make it.` : '';
+    $('empty').hidden = data.length > 0; $('table').hidden = data.length === 0;
+    const tbody = $('rows'); tbody.textContent = '';
+    for (const r of [...yes, ...no]) {
+      const tr = document.createElement('tr'); if (!r.attending) tr.className = 'no';
+      const name = document.createElement('td'); name.textContent = r.family_name;
+      if (r.note) { const n = document.createElement('div'); n.className = 'note'; n.textContent = r.note; name.append(n); }
+      const st = document.createElement('td'); const pill = document.createElement('span'); pill.className = 'pill'; pill.textContent = r.attending ? 'Yes' : 'No'; st.append(pill);
+      const a = document.createElement('td'); a.className = 'num'; a.textContent = r.attending ? r.adults : '–';
+      const k = document.createElement('td'); k.className = 'num'; k.textContent = r.attending ? r.kids : '–';
+      tr.append(name, st, a, k); tbody.append(tr);
+    }
+  }
+
+  async function render(session) {
+    if (!session) { show('signin'); return; }
+    $('who').textContent = 'Signed in as ' + session.user.email;
+    show('report'); await load();
+  }
+
+  $('refresh').addEventListener('click', load);
+  $('signout').addEventListener('click', async () => { await sb.auth.signOut(); render(null); });
+  sb.auth.onAuthStateChange((_event, session) => render(session));
+})();
+</script>
+</body></html>
