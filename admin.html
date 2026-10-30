@@ -33,8 +33,10 @@ th{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted
 <div id="signin" hidden>
   <form id="loginForm" novalidate>
     <label for="email">Host email</label>
-    <input id="email" type="email" autocomplete="email" placeholder="you@example.com" required>
-    <button class="button submit" id="loginBtn" type="submit">Email me a sign-in link</button>
+    <input id="email" type="email" autocomplete="username" placeholder="you@example.com" required>
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" required>
+    <button class="button submit" id="loginBtn" type="submit">Sign in</button>
     <div id="loginStatus" class="status" role="status" aria-live="polite"></div>
   </form>
 </div>
@@ -76,12 +78,14 @@ th{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted
 
   $('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const email = $('email').value.trim();
-    if (!$('email').checkValidity() || !email) { $('loginStatus').textContent = 'Enter a valid email address.'; return; }
-    $('loginBtn').disabled = true;
-    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
+    const email = $('email').value.trim(), password = $('password').value;
+    if (!$('email').checkValidity() || !email || !password) { $('loginStatus').textContent = 'Enter your email and password.'; return; }
+    $('loginBtn').disabled = true; $('loginStatus').textContent = '';
+    const { error } = await sb.auth.signInWithPassword({ email, password });
     $('loginBtn').disabled = false;
-    $('loginStatus').textContent = error ? 'Could not send the link: ' + error.message : 'Check your email and tap the sign-in link.';
+    if (error) $('loginStatus').textContent = error.message === 'Invalid login credentials'
+      ? 'Wrong email or password. Check the user you created in Supabase > Authentication > Users.'
+      : 'Could not sign in: ' + error.message;
   });
 
   async function load() {
